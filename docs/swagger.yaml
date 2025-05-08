@@ -1,0 +1,127 @@
+basePath: /
+definitions:
+  api.refreshRequest:
+    properties:
+      accessToken:
+        type: string
+      refreshToken:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: API for managing access and refresh tokens
+  title: AuthService API
+  version: "1.0"
+paths:
+  /deauth:
+    post:
+      description: Deletes refresh token for the current user, effectively logging
+        them out
+      parameters:
+      - description: Bearer access_token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      responses:
+        "401":
+          description: missing or invalid auth header
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Invalidate tokens
+      tags:
+      - auth
+  /getToken:
+    get:
+      consumes:
+      - application/json
+      description: Generates a pair of access and refresh tokens for the guid
+      parameters:
+      - description: user guid
+        in: query
+        name: guid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: accessToken and refreshToken
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: invalid guid
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Generate tokens
+      tags:
+      - auth
+  /refresh:
+    post:
+      consumes:
+      - application/json
+      description: Refreshes the access token using a refresh token
+      parameters:
+      - description: Access + refresh tokens
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.refreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: accessToken and refreshToken
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid refresh token
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Refresh tokens
+      tags:
+      - auth
+  /whoami:
+    get:
+      description: Returns the guid of the user extracted from a valid access token
+      parameters:
+      - description: Bearer access_token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: guid
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: invalid token claims
+          schema:
+            type: string
+      summary: Get user guid
+      tags:
+      - auth
+swagger: "2.0"

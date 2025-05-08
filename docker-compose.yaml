@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:15
+    image: postgres:latest
     container_name: db
     restart: always
     environment:
@@ -28,7 +28,12 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./database/pgadmin_servers.json:/pgadmin4/servers.json
-
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
 volumes:
   pg_data:
   pgadmin_data:

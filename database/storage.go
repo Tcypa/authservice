@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -22,6 +23,15 @@ var (
 	initOnce sync.Once
 	initErr  error
 )
+
+type refreshToken struct {
+	Guid      string
+	TokenHash string
+	UserAgent string
+	IPAddress string
+	IssuedAt  time.Time
+	ExpiresAt time.Time
+}
 
 func Init(ctx context.Context) (*PgStorage, error) {
 	initOnce.Do(func() {
@@ -55,29 +65,51 @@ func (p *PgStorage) Insert(guid string, tokenHash string, userAgent string, ipAd
 
 	p.Mu.Lock()
 	defer p.Mu.Unlock()
-	var exists bool
-	var err error
-	err = p.pool.QueryRow(context.Background(), "SELECT EXISTS (SELECT 1 FROM refreshTokens WHERE uguid = $1)", guid).Scan(&exists)
+	_, err := p.pool.Exec(context.Background(), `
+        INSERT INTO refreshTokens (uguid, tokenHash, userAgent, ipAddress, issued, expires)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (uguid) DO UPDATE SET
+            tokenHash = EXCLUDED.tokenHash,
+            userAgent = EXCLUDED.userAgent,
+            ipAddress = EXCLUDED.ipAddress,
+            issued = EXCLUDED.issued,
+            expires = EXCLUDED.expires;`,
+		guid, tokenHash, userAgent, ipAddress, issued, issued.Add(internal.RefreshLifetime))
 	if err != nil {
-		return err
+		log.Printf("error insert: %v,", err)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			log.Printf("pg error: %s", pgErr.Message)
+		} else {
+			log.Printf("unknown pg error: %v", err)
+		}
+		return errors.New("server error")
 	}
-	if exists == true {
-		var dbAnswer string
-		err = p.pool.QueryRow(context.Background(), "INSERT INTO UrlShorter (uguid, tokenHash, userAgent, ipAddress, issued_at, expires_at)"+
-			"VALUES ($1, $2, $3, $4, $5, $6)", guid, tokenHash, userAgent, ipAddress, issued, issued.Add(internal.RefreshLifetime)).Scan(&dbAnswer)
-		return err
-	} else {
-		return errors.New("")
-	}
+	return nil
+
 }
 
-func (p *PgStorage) Read(shortUrl string) (string, error) {
+func (p *PgStorage) Read(guid string) (refreshToken, error) {
+	p.Mu.RLock()
+	defer p.Mu.RUnlock()
+	var token refreshToken
+	err := p.pool.QueryRow(context.Background(), `
+        SELECT uguid, tokenHash, userAgent, ipAddress, issued, expires
+        FROM refreshTokens
+        WHERE uguid = $1`, guid).Scan(
+		&token.Guid, &token.TokenHash, &token.UserAgent, &token.IPAddress, &token.IssuedAt, &token.ExpiresAt)
+	if err != nil {
+		return refreshToken{}, errors.New("token not found")
+	}
+	return token, nil
+}
+
+func (p *PgStorage) Delete(guid string) error {
 	p.Mu.Lock()
 	defer p.Mu.Unlock()
-	var origUrl string
-	err := p.pool.QueryRow(context.Background(), "SELECT origUrl FROM UrlShorter WHERE shortUrl = $1", shortUrl).Scan(&origUrl)
+	_, err := p.pool.Exec(context.Background(), "DELETE FROM refreshTokens WHERE uguid = $1", guid)
 	if err != nil {
-		return "", errors.New("short URL not found")
+		return errors.New("server error")
 	}
-	return origUrl, nil
+	return nil
 }
